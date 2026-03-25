@@ -6,10 +6,12 @@ import { createGame, createPlayer } from "./engine/factories.js";
 import pkg from "pg";
 const { Pool } = pkg;
 
+// configuer the app to connect to postgres db
 export const db = new Pool({
-  user: "epane", 
+  user: "epane",
   host: "localhost",
   database: "my123_game",
+  password: "March15Narwhal",
   port: 5432,
 });
 
@@ -18,21 +20,23 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ server });
 
+// have express serve static assets from /public
 app.use(express.static("public"));
 
+// express and ws listening on port 3000
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
 export const wsToPlayerInfo = new Map();
-let nextPlayerNumber = 1;
+
 let players = [];
 let game;
-let _winnerIndex = null;
+
 export let loggedInPlayers = 0;
 
-
+// dispatch map for intent coming via ws from client (renderers): maps to ss handlers
 const handlers = {
     start_new_game: handleStartGame,
     click_number: handleClickNumber,
@@ -40,9 +44,11 @@ const handlers = {
     get_stats: handleLegacyStats,
 }
 
+// what to do when a client hits the landing page
 wss.on("connection", (ws) => {
     console.log("Client connected");
 
+    // what to do when a client sends a ws message to the server
     ws.on("message", async (data) => {
         let message;
         try {
@@ -50,38 +56,76 @@ wss.on("connection", (ws) => {
         } catch {
           return; 
         }
-      
+        
+      // when a client connects, it sends "init" intent and its clientId
+      // that clientId is either pulled (in index.js) from local storage or generated
         if (message.type === "init") {
-          // This is the handshake message containing clientId
-          const { clientId, alias } = message;
+          const { clientId } = message;
 
-          // check DB for clientId and insert if needed
-          let playerRecord = await db.query(
+          // Check DB for existing client
+          const playerRecord = await db.query(
             "SELECT * FROM clients WHERE client_id = $1",
             [clientId],
           );
 
           let playerNumber;
+          let alias;
+
           if (playerRecord.rowCount === 0) {
-            // new client → insert and return inserted row
+            // Get all used player_numbers from DB and active connections
+            const dbNumbersRes = await db.query(
+              "SELECT player_number FROM clients",
+            );
+            const dbNumbers = dbNumbersRes.rows.map((r) => r.player_number);
+            const wsNumbers = Array.from(wsToPlayerInfo.values()).map(
+              (p) => p.playerNumber,
+            );
+            const usedNumbers = [...new Set([...dbNumbers, ...wsNumbers])];
+
+            // Assign the lowest available number
+            playerNumber = 1;
+            while (usedNumbers.includes(playerNumber)) {
+              playerNumber++;
+            }
+
+            alias = `Player ${playerNumber}`;
+
+            // Insert new client
             const result = await db.query(
               "INSERT INTO clients (client_id, alias, player_number) VALUES ($1, $2, $3) RETURNING *",
-              [
-                clientId,
-                alias || `Player ${nextPlayerNumber}`,
-                nextPlayerNumber,
-              ],
+              [clientId, alias, playerNumber],
             );
             playerNumber = result.rows[0].player_number;
-            nextPlayerNumber++; // increment after assignment
+            alias = result.rows[0].alias;
           } else {
             playerNumber = playerRecord.rows[0].player_number;
+            alias = playerRecord.rows[0].alias;
           }
 
-          wsToPlayerInfo.set(ws, { playerNumber, alias, clientId });
+          const player = createPlayer(alias);
+          
+          const statsRecord = await db.query(
+            "SELECT games_played, games_won FROM player_stats WHERE client_id = $1",
+            [clientId],
+          );
+
+          if (statsRecord.rowCount > 0) {
+            player.setStats({
+              gamesPlayed: statsRecord.rows[0].games_played,
+              gamesWon: statsRecord.rows[0].games_won,
+            });
+          }
+
+          wsToPlayerInfo.set(ws, {
+            playerNumber,
+            alias,
+            clientId,
+            player,
+          });
+
           loggedInPlayers++;
           console.log(
-            `Assigned Player ${playerNumber} for clientId ${clientId}`,
+            `Assigned ${alias} (#${playerNumber}) for clientId ${clientId}`,
           );
 
           return; // done with handshake
@@ -100,39 +144,43 @@ wss.on("connection", (ws) => {
 });
 
 async function handleStartGame(ws, message) {
-    players = [];
+  // Sort connections by playerNumber to ensure correct playerIndex
+  players = Array.from(wsToPlayerInfo.values())
+    .sort((a, b) => a.playerNumber - b.playerNumber)
+    .map((info) => info.player);
 
-    for (const [, playerInfo] of wsToPlayerInfo) {
-        const playerName = `${playerInfo.alias} ${playerInfo.playerNumber}`;
-        const player = createPlayer(playerName);
-        player.playerName = playerName;
-        players.push(player);
-    }
+  game = createGame(players);
+  game.startNewGame();
 
-    game = createGame(players);
-
-    game.startNewGame();
-    
   const state = game.getState();
-  
+
+  // Assign numbersPlayed to each player
   players.forEach((player, idx) => {
     player.numbersPlayed = state.numbersPlayed
       .filter((play) => play.playerIndex === idx)
       .map((play) => play.number);
   });
 
-    for (const client of wss.clients) {
-        if (client.readyState === client.OPEN) {
-            client.send(
-              JSON.stringify({
-                type: "ready_to_start",
-                players,
-                currentPhase: state.currentPhase,
-                numbersAvailable: state.numbersAvailable,
-              }),
-            );
-        }
+  const playersForClient = players.map((p) => ({
+    playerName: p.getName(),
+    numbersPlayed: p.numbersPlayed || [],
+    gamesPlayed: p.getStats().gamesPlayed,
+    gamesWon: p.getStats().gamesWon,
+  }));
+
+  // Broadcast ready_to_start to all clients
+  for (const client of wss.clients) {
+    if (client.readyState === client.OPEN) {
+      client.send(
+        JSON.stringify({
+          type: "ready_to_start",
+          players: playersForClient,
+          currentPhase: state.currentPhase,
+          numbersAvailable: state.numbersAvailable,
+        }),
+      );
     }
+  }
 }
 
 async function handleClickNumber(ws, message) {
@@ -152,12 +200,19 @@ async function handleClickNumber(ws, message) {
         .filter((play) => play.playerIndex === idx)
         .map((play) => play.number);
     });
-
+  
+    const playersForClient = players.map((p) => ({
+      playerName: p.getName(),
+      numbersPlayed: p.numbersPlayed || [],
+      gamesPlayed: p.getStats().gamesPlayed,
+      gamesWon: p.getStats().gamesWon,
+    }));
+  
     wss.clients.forEach((client) => {
       client.send(
         JSON.stringify({
           type: "number_played",
-          players,
+          players: playersForClient,
           currentPhase: state.currentPhase,
           numbersAvailable: result.numbersAvailable,
           numberClicked,
@@ -167,28 +222,26 @@ async function handleClickNumber(ws, message) {
     });
       
   if (result.currentPhase === "gameOver") {
-      players.forEach((player, idx) => {
-        if (idx === _winnerIndex) {
-          player.recordWin();
-        } else {
-          player.recordLoss();
-        }
-      });
     
-      for (const player of players) {
-        const { clientId } = wsToPlayerInfo.get(ws); // or store in player object
-        const stats = player.getStats();
+      for (const [socket, info] of wsToPlayerInfo.entries()) {
+        const playerNumber = info.playerNumber;
+        const playerIndex = playerNumber - 1;
 
+        const player = players[playerIndex];
+        if (!player) continue;
+
+        const stats = player.getStats();
+      
         await db.query(
           `
-            INSERT INTO player_stats (client_id, games_played, games_won, last_played)
-            VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (client_id) DO UPDATE
-            SET games_played = EXCLUDED.games_played,
-                games_won = EXCLUDED.games_won,
-                last_played = NOW()
-        `,
-          [clientId, stats.gamesPlayed, stats.gamesWon],
+          INSERT INTO player_stats (client_id, games_played, games_won, last_played)
+          VALUES ($1, $2, $3, NOW())
+          ON CONFLICT (client_id) DO UPDATE
+          SET games_played = EXCLUDED.games_played,
+              games_won = EXCLUDED.games_won,
+              last_played = NOW()
+          `,
+          [info.clientId, stats.gamesPlayed, stats.gamesWon],
         );
       }
     
@@ -196,12 +249,12 @@ async function handleClickNumber(ws, message) {
           client.send(
             JSON.stringify({
               type: "game_over",
-              players,
+              players: playersForClient,
               winnerIndex: state.winnerIndex,
             }),
           );
-        });
-      }
+      });
+    }
 }  
 
 async function handleUndoPlay(ws, message) {
@@ -221,13 +274,20 @@ async function handleUndoPlay(ws, message) {
       .map((play) => play.number);
   });
 
+  const playersForClient = players.map((p) => ({
+    playerName: p.getName(),
+    numbersPlayed: p.numbersPlayed || [],
+    gamesPlayed: p.getStats().gamesPlayed,
+    gamesWon: p.getStats().gamesWon,
+  }));
+
   // broadcast updated game state to all clients
   wss.clients.forEach((client) => {
     if (client.readyState === client.OPEN) {
       client.send(
         JSON.stringify({
           type: "undo_played",
-          players,
+          players: playersForClient,
           currentPhase: state.currentPhase,
           numbersAvailable: result.numbersAvailable,
           restoredPlayerIndex: result.restoredPlayerIndex,

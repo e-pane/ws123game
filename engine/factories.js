@@ -34,5 +34,10 @@ export function createPlayer(name) {
     _gamesPlayed++;
   };
 
+  player.setStats = ({ gamesPlayed, gamesWon }) => {
+    _gamesPlayed = gamesPlayed;
+    _gamesWon = gamesWon;
+  };
+
   return player;
 }

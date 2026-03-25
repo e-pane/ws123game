@@ -22,12 +22,6 @@ if (!clientId) {
   localStorage.setItem("clientId", clientId);
 }
 
-let alias = localStorage.getItem("alias");
-if (!alias) {
-  alias = `Player`; // or prompt user
-  localStorage.setItem("alias", alias);
-}
-
 export const ws = new WebSocket("ws://10.0.0.98:3000");
 
 ws.onopen = () => {
@@ -35,7 +29,6 @@ ws.onopen = () => {
     JSON.stringify({
       type: "init",
       clientId,
-      alias,
     }),
   );
 };
@@ -61,26 +54,37 @@ ws.onmessage = (event) => {
 function handleGameStart(message) {
     clearStartButton();
     clearPreGameUI()
-    renderGameUI(message);
+    renderGameUI(message, ws);
 }
 
 function handlePlayNumber(message) {
     const { players, currentPhase, numbersAvailable } = message;
-    renderGameUI({ players, currentPhase, numbersAvailable });
+    renderGameUI({ players, currentPhase, numbersAvailable }, ws);
     }
 
 function handleUndoPlay(message) {
     console.log("client side undo play handler reached");
     const { players, currentPhase, numbersAvailable } = message;
-    renderGameUI({ players, currentPhase, numbersAvailable });
+    
+    // players.forEach((player, idx) => {
+    //   player.playerName = players[idx].playerName;
+    //   player.numbersPlayed = players[idx].numbersPlayed;
+    //   player.gamesPlayed = players[idx].gamesPlayed;
+    //   player.gamesWon = players[idx].gamesWon;
+    // });
+    renderGameUI({ players, currentPhase, numbersAvailable }, ws);
 }
 
 function handleGameOver(message) {
     const players = message.players;
     const winnerIndex = message.winnerIndex
+    console.log(winnerIndex);
     const winningPlayer = players[winnerIndex];
+    console.log(winningPlayer);
     const winningPlayerName = winningPlayer.playerName;
-    renderGameOver(winningPlayerName);
+  
+    renderGameOver(winningPlayerName, ws);
+    renderStartButton(ws);
 }
 
 function handleLegacyStatsOverlay(message) {
@@ -90,4 +94,4 @@ function handleLegacyStatsOverlay(message) {
     renderLegacyStats(players);
 }
 
-renderStartButton();
+renderStartButton(ws);

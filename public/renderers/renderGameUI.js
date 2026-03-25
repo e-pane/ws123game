@@ -1,4 +1,3 @@
-import { ws } from "../index.js";
 
 const numberToImage = {
   1: "/images/ball1.png",
@@ -11,7 +10,7 @@ const numberToImage = {
   // 8: "/images/8.png",
 };
 
-export function renderStartButton() {
+export function renderStartButton(ws) {
   const container = document.querySelector("#gameView");
 
   if (!container) {
@@ -58,13 +57,14 @@ export function clearPreGameUI() {
   });
 }
 
-export function renderGameUI({ players, currentPhase, numbersAvailable }) {
+export function renderGameUI({ players, currentPhase, numbersAvailable }, ws) {
+  console.log(numbersAvailable);
   // Render the balls in the main play area
-  renderPlayArea(numbersAvailable, currentPhase);
+  renderPlayArea(numbersAvailable, currentPhase, ws); 
 
   // Render the balls already played for each player
   players.forEach((p, idx) => {
-    renderPlayerBalls(idx, p.numbersPlayed || []);
+    renderPlayerBalls(idx, p.numbersPlayed || [], ws);
   });
 
   // Update player names, etc.
@@ -76,7 +76,7 @@ export function renderGameUI({ players, currentPhase, numbersAvailable }) {
   });
 }
 
-export function renderPlayArea(numbersAvailable, currentPhase) {
+export function renderPlayArea(numbersAvailable, currentPhase, ws) {
   const numberRow = document.querySelector(".number-row");
   if (!numberRow) return;
 
@@ -105,7 +105,7 @@ export function renderPlayArea(numbersAvailable, currentPhase) {
   });
 }
 
-export function renderPlayerBalls(playerIndex, numbersPlayedByPlayer) {
+export function renderPlayerBalls(playerIndex, numbersPlayedByPlayer, ws) {
   const container = document.querySelector(`#player-${playerIndex}`);
   if (!container) return;
 
@@ -132,7 +132,7 @@ export function renderPlayerBalls(playerIndex, numbersPlayedByPlayer) {
   });
 }
 
-export function renderGameOver(winnerName) {
+export function renderGameOver(winnerName, ws) {
   const numberRow = document.querySelector(".number-row");
   if (!numberRow) return;
 

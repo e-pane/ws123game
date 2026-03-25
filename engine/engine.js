@@ -4,10 +4,7 @@ export function create123Engine(players) {
   let _players = players;
   let _currentPhase = "gamePlay" // waiting | gamePlay | gameOver
   let _loggedInPlayers = loggedInPlayers;
-  let _numbersAvailable = [];
-  for (let i = 0; i < _loggedInPlayers; i++) {
-    _numbersAvailable.push(i + 1);
-  }
+  let _numbersAvailable = _players.map((_, idx) => idx + 1);
   let _numbersPlayed = [];
   let _score = 0;
   let _winnerIndex = null;
