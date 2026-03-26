@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "pg": "^8.18.0",
     "ws": "^8.19.0"
@@ -7,7 +8,6 @@
   "type": "module",
   "name": "ws123Game",
   "version": "1.0.0",
-
   "scripts": {
     "start": "node server.js"
   }
