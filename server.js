@@ -10,12 +10,7 @@ import { createGame, createPlayer } from "./engine/factories.js";
 import pkg from "pg";
 const { Pool } = pkg;
 
-const pool = new Pool(DB_CONFIG);
-
-const res = await pool.query(
-  "SELECT current_database(), inet_server_addr(), inet_server_port()",
-);
-console.log("Backend is connected to:", res.rows[0]);
+export const db = new Pool(DB_CONFIG);
 
 const app = express();
 const server = http.createServer(app);
@@ -160,7 +155,7 @@ async function handleStartGame(ws, message) {
       .filter((play) => play.playerIndex === idx)
       .map((play) => play.number);
   });
-
+  
   const playersForClient = players.map((p) => ({
     playerName: p.getName(),
     numbersPlayed: p.numbersPlayed || [],
@@ -193,6 +188,7 @@ async function handleClickNumber(ws, message) {
   const result = game.playNumber(playerIndex, numberClicked);
 
   if (!result.success) return;
+
   const state = game.getState();
 
   players.forEach((player, idx) => {
